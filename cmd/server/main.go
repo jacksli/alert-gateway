@@ -1,6 +1,7 @@
 package main
 
 import (
+	"alert-gateway/config"
 	"log"
 	"net/http"
 
@@ -14,27 +15,14 @@ import (
 )
 
 func main() {
-	// 配置示例（生产环境建议读取 config/config.yaml）
-	providerConfigs := map[string]map[string]interface{}{
-		"dingtalk_robot": {
-			"app_key":    "YOUR_DINGTALK_APP_KEY",
-			"app_secret": "YOUR_DINGTALK_APP_SECRET",
-		},
-		"dingtalk_webhook": {
-			"webhook_url": "https://oapi.dingtalk.com/robot/send?access_token=YOUR_ACCESS_TOKEN",
-			"secret":      "SECxxxxxxx",
-		},
-		"email": {
-			"smtp_host": "smtp.qq.com",
-			"smtp_port": 465,
-			"smtp_user": "alert@yourcompany.com",
-			"smtp_pass": "your_smtp_password",
-			"from":      "运维告警中心 <alert@yourcompany.com>",
-		},
+	// 1. 从 YAML 配置文件读取配置
+	cfg, err := config.LoadConfig("config/config.yaml")
+	if err != nil {
+		log.Fatalf("加载配置失败: %v", err)
 	}
 
 	// 1. 初始化 UseCase
-	uc, err := notifier.NewNotifierUseCase(providerConfigs)
+	uc, err := notifier.NewNotifierUseCase(cfg.Providers)
 	if err != nil {
 		log.Fatalf("UseCase 初始化失败: %v", err)
 	}
