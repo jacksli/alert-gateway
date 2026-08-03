@@ -156,10 +156,10 @@ func (p *DingTalkRobotProvider) sendDingNotice(ctx context.Context, token string
 	dingURL := fmt.Sprintf("https://api.dingtalk.com/v1.0/robot/ding/send")
 
 	dingPayload := map[string]interface{}{
-		"robotCode":  p.appKey,
-		"remindType": p.dingType,
+		"robotCode":          p.appKey,
+		"remindType":         p.dingType,
 		"receiverUserIdList": ReceiverIDs,
-		"content": fmt.Sprintf("🚨【告警强提醒】%s\n请立即处理！", n.Title),,
+		"content":            fmt.Sprintf("🚨【告警强提醒】%s\n请立即处理！", n.Title),
 	}
 
 	bodyBytes, _ := json.Marshal(dingPayload)

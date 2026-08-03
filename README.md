@@ -1,5 +1,5 @@
 # ReadMe
-
+ * Send Alert Message To Ding Robot & Dingding Webhook 
 ## config.yaml
 * place config.yaml in config directory
 
@@ -18,6 +18,7 @@ providers:
   dingtalk_robot:
     app_key: "*****"
     app_secret: "*****"
+    enable_ding: true   # 启用DING功能
     ding_type: 1   # DING 类型：1-应用内DING(默认)，2-短信DING，3-电话DING
 
 
