@@ -6,8 +6,13 @@ import (
 	"github.com/spf13/viper"
 )
 
+type AuthConfig struct {
+	APIToken string `mapstructure:"api_token"`
+}
+
 // Config 全局配置结构体
 type Config struct {
+	Auth      AuthConfig                        `mapstructure:"auth"`
 	Server    ServerConfig                      `mapstructure:"server"`
 	Providers map[string]map[string]interface{} `mapstructure:"providers"`
 	// 修改为 []string 切片，支持多个默认接收人

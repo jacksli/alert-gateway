@@ -4,6 +4,9 @@
 * place config.yaml in config directory
 
 ```
+# 全局安全认证配置
+auth:
+  api_token: "your-global-secret-token-2026"  # 所有接口通用的认证 Token
 server:
   port: "8080"
   #--------------------------------------
@@ -20,7 +23,12 @@ providers:
     app_secret: "*****"
     enable_ding: true   # 启用DING功能
     ding_type: 1   # DING 类型：1-应用内DING(默认)，2-短信DING，3-电话DING
-
+  # 🚀 Jenkins 发版专用的单独机器人
+  jenkins_dingtalk_robot:
+    app_key: "*****"
+    app_secret: "*****"
+    enable_ding: true   # 启用DING功能
+    ding_type: 1   # DING 类型：1-应用内DING(默认)，2-短信DING，3-电话DING
 
   # 渠道 2: 钉钉群 Webhook
   dingtalk_webhook:
