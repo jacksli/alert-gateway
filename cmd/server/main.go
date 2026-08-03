@@ -28,7 +28,7 @@ func main() {
 	}
 
 	// 2. 初始化 Delivery Handler
-	handler := v1.NewHandler(uc)
+	handler := v1.NewHandler(uc, cfg)
 
 	// 3. 注册 HTTP 路由
 	http.Handle("/api/v1/webhook", handler)

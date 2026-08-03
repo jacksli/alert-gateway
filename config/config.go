@@ -10,6 +10,8 @@ import (
 type Config struct {
 	Server    ServerConfig                      `mapstructure:"server"`
 	Providers map[string]map[string]interface{} `mapstructure:"providers"`
+	// 修改为 []string 切片，支持多个默认接收人
+	DefaultReceiverUserID []string `mapstructure:"default_receiver_userid"`
 }
 
 type ServerConfig struct {

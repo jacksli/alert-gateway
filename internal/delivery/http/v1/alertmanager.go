@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"alert-gateway/config"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,10 +16,14 @@ import (
 
 type Handler struct {
 	useCase *notifier.NotifierUseCase
+	cfg     *config.Config
 }
 
-func NewHandler(uc *notifier.NotifierUseCase) *Handler {
-	return &Handler{useCase: uc}
+func NewHandler(uc *notifier.NotifierUseCase, cfg *config.Config) *Handler {
+	return &Handler{
+		useCase: uc,
+		cfg:     cfg,
+	}
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -53,10 +58,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		isCritical := severity == "critical" || severity == "high"
 
-		// 1. 钉钉群 Webhook（所有级别都发）
+		// 1. 钉钉群 Webhook（所有级别均推送）
 		go dispatchAsync(h.useCase, "dingtalk_webhook", notification, "钉钉群 Webhook")
 
-		// 2. 邮件 Email（所有级别都发）
+		// 2. 邮件 Email（所有级别均推送，如果指定了邮箱）
 		userEmail := alert.Labels["email"]
 		if userEmail != "" {
 			emailNotification := *notification
@@ -64,13 +69,31 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			go dispatchAsync(h.useCase, "email", &emailNotification, fmt.Sprintf("邮件 (%s)", userEmail))
 		}
 
+		// ---------------------------------------------------------------------
 		// 3. 钉钉应用机器人私信（仅高级别 critical/high 触发）
-		userid := alert.Labels["receiver_userid"]
-		if isCritical && userid != "" {
+		// 解析目标 UserID 列表：优先使用告警标签（支持逗号分隔多个），无标签时使用配置文件中的切片
+		// ---------------------------------------------------------------------
+		var targetUserIDs []string
+
+		if rawUserID := alert.Labels["receiver_userid"]; rawUserID != "" {
+			// 如果 Alertmanager 标签里通过逗号传了多个（如 "user1,user2"），拆分为切片
+			for _, id := range strings.Split(rawUserID, ",") {
+				if trimmed := strings.TrimSpace(id); trimmed != "" {
+					targetUserIDs = append(targetUserIDs, trimmed)
+				}
+			}
+		} else {
+			// 兜底使用配置文件中的默认 UserID 切片
+			targetUserIDs = h.cfg.DefaultReceiverUserID
+		}
+
+		if isCritical && len(targetUserIDs) > 0 {
 			privateNotification := *notification
-			privateNotification.ReceiverIDs = []string{userid}
-			go dispatchAsync(h.useCase, "dingtalk_robot", &privateNotification, fmt.Sprintf("钉钉应用私信 (%s)", userid))
-		} else if !isCritical && userid != "" {
+			privateNotification.ReceiverIDs = targetUserIDs
+
+			logLabel := fmt.Sprintf("钉钉应用私信 (共 %d 人: %s)", len(targetUserIDs), strings.Join(targetUserIDs, ","))
+			go dispatchAsync(h.useCase, "dingtalk_robot", &privateNotification, logLabel)
+		} else if !isCritical && len(targetUserIDs) > 0 {
 			log.Printf("[跳过推送] 当前告警级别为 (%s)，不触发钉钉个人私信强提醒", severity)
 		}
 	}
@@ -79,7 +102,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"success"}`))
 }
 
-// ✅ 正确的异步调度辅助函数：为每个异步请求分配 10 秒超时的 Context
 func dispatchAsync(uc *notifier.NotifierUseCase, channel string, n *entity.Notification, label string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
