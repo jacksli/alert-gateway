@@ -1,11 +1,13 @@
 package v1
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"alert-gateway/internal/entity"
 	"alert-gateway/internal/usecase/notifier"
@@ -49,37 +51,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Status:   alert.Status,
 		}
 
-		// 判断是否为高级别告警 (critical 或 high)
 		isCritical := severity == "critical" || severity == "high"
 
-		// ---------------------------------------------------------------------
-		// 渠道 1：钉钉群 Webhook（公共群里人人可见）
-		// 分发策略：所有级别告警（低级别 + 高级别）均发送
-		// ---------------------------------------------------------------------
-		go dispatchAsync(r.Context(), h.useCase, "dingtalk_webhook", notification, "钉钉群 Webhook")
+		// 1. 钉钉群 Webhook（所有级别都发）
+		go dispatchAsync(h.useCase, "dingtalk_webhook", notification, "钉钉群 Webhook")
 
-		// ---------------------------------------------------------------------
-		// 渠道 2：邮件 Email
-		// 分发策略：所有级别告警均发送（如果配置了接收人邮箱，也可以配置默认公共运维邮箱）
-		// ---------------------------------------------------------------------
+		// 2. 邮件 Email（所有级别都发）
 		userEmail := alert.Labels["email"]
 		if userEmail != "" {
 			emailNotification := *notification
 			emailNotification.ReceiverIDs = []string{userEmail}
-			go dispatchAsync(r.Context(), h.useCase, "email", &emailNotification, fmt.Sprintf("邮件 (%s)", userEmail))
+			go dispatchAsync(h.useCase, "email", &emailNotification, fmt.Sprintf("邮件 (%s)", userEmail))
 		}
 
-		// ---------------------------------------------------------------------
-		// 渠道 3：钉钉应用机器人（强提醒私信）
-		// 分发策略：只有高级别告警 (critical / high) 且有 receiver_userid 时才发送私信强提醒
-		// ---------------------------------------------------------------------
+		// 3. 钉钉应用机器人私信（仅高级别 critical/high 触发）
 		userid := alert.Labels["receiver_userid"]
 		if isCritical && userid != "" {
 			privateNotification := *notification
 			privateNotification.ReceiverIDs = []string{userid}
-			go dispatchAsync(r.Context(), h.useCase, "dingtalk_robot", &privateNotification, fmt.Sprintf("钉钉应用私信 (%s)", userid))
+			go dispatchAsync(h.useCase, "dingtalk_robot", &privateNotification, fmt.Sprintf("钉钉应用私信 (%s)", userid))
 		} else if !isCritical && userid != "" {
-			log.Printf("[跳过推送] 当前告警为低级别 (%s)，不触发钉钉个人私信强提醒", severity)
+			log.Printf("[跳过推送] 当前告警级别为 (%s)，不触发钉钉个人私信强提醒", severity)
 		}
 	}
 
@@ -87,10 +79,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(`{"status":"success"}`))
 }
 
-// 异步调度辅助函数
-func dispatchAsync(ctx interface{}, uc *notifier.NotifierUseCase, channel string, n *entity.Notification, label string) {
-	// 注意：实际调用时请使用带有 timeout 的 background ctx 或传入的 context
-	if err := uc.Dispatch(nil, channel, n); err != nil {
+// ✅ 正确的异步调度辅助函数：为每个异步请求分配 10 秒超时的 Context
+func dispatchAsync(uc *notifier.NotifierUseCase, channel string, n *entity.Notification, label string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := uc.Dispatch(ctx, channel, n); err != nil {
 		log.Printf("[推送失败] %s: %v", label, err)
 	} else {
 		log.Printf("[推送成功] %s", label)

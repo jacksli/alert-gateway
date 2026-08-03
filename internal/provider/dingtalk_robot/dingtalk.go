@@ -81,7 +81,7 @@ func (d *DingTalkProvider) Send(ctx context.Context, n *entity.Notification) err
 	req.Header.Set("x-acs-dingtalk-access-token", token)
 
 	resp, err := http.DefaultClient.Do(req)
-	log.Println("Access_token:", token)
+	//log.Println("Access_token:", token)
 	if err != nil {
 		return err
 	}
@@ -92,6 +92,8 @@ func (d *DingTalkProvider) Send(ctx context.Context, n *entity.Notification) err
 	// 校验返回结果
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("钉钉应用机器人发送失败 [HTTP %d]: %s", resp.StatusCode, string(respBuf))
+	} else {
+		log.Println("钉钉应用机器人发送成功", string(respBuf))
 	}
 
 	var res struct {
