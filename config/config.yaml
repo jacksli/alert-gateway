@@ -5,12 +5,12 @@ providers:
   # 渠道 1: 钉钉应用私信
   dingtalk_robot:
     app_key: "dingeh9wax4r0ch41juc"
-    app_secret: "Y_sLN5PgOnP-TaxqlgiE92kPiZjnFYL2OkhJc5sV1eZzgXokWP4S7xuP5sFqaDiI"
+    app_secret: "G3KZoDokYVGP79WgEn4_Hz1OT2vLHa4wcbrjTWxLz1k9mL06uTy3sjbuTCAtmluP"
 
   # 渠道 2: 钉钉群 Webhook
   dingtalk_webhook:
     webhook_url: "https://oapi.dingtalk.com/robot/send?access_token=bb2aaef5b255e0c84e1cbe4f62acc7767e4277cfc44b9de8ea882e17b925b584"
-    secret: "SECd92091b6fec90e5de6fb0fc863475bbe87d0715e65bbcc12f50a851225fe859a" # 选填：加签密钥
+    secret: "SECbf780ff2b7a0f8263b3842c952acd7b9eff35b6e3aa4a55531aa8911f3a2ecad" # 选填：加签密钥
 
   # 渠道 3: 邮件服务 (SMTP)
   email:
