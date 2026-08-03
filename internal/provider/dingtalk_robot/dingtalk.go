@@ -142,7 +142,7 @@ func (p *DingTalkRobotProvider) Send(ctx context.Context, n *entity.Notification
 	// 如果开启了自动 DING 强提醒，调用发送 DING 操作
 	// ---------------------------------------------------------------------
 	if p.enableDing {
-		if err := p.sendDingNotice(ctx, token, userListStr, n); err != nil {
+		if err := p.sendDingNotice(ctx, token, n.ReceiverIDs, n); err != nil {
 			// DING 提醒失败仅记录日志，不阻断主通知流程
 			fmt.Printf("[DING 触发异常] UserIDs: %s, 原因: %v\n", userListStr, err)
 		}
@@ -152,15 +152,14 @@ func (p *DingTalkRobotProvider) Send(ctx context.Context, n *entity.Notification
 }
 
 // sendDingNotice 发送 DING 强提醒
-func (p *DingTalkRobotProvider) sendDingNotice(ctx context.Context, token, userListStr string, n *entity.Notification) error {
-	dingURL := fmt.Sprintf("https://oapi.dingtalk.com/topapi/ding/send?access_token=%s", token)
+func (p *DingTalkRobotProvider) sendDingNotice(ctx context.Context, token string, ReceiverIDs []string, n *entity.Notification) error {
+	dingURL := fmt.Sprintf("https://api.dingtalk.com/v1.0/robot/ding/send")
 
 	dingPayload := map[string]interface{}{
-		"open_ding_send_vo": map[string]interface{}{
-			"receiver_user_ids": strings.Split(userListStr, ","),
-			"content":           fmt.Sprintf("🚨【告警强提醒】%s\n请立即处理！", n.Title),
-			"remind_type":       p.dingtypeText(p.dingType), // 1: 应用内; 2: 短信; 3: 电话
-		},
+		"robotCode":  p.appKey,
+		"remindType": p.dingType,
+		"receiverUserIdList": ReceiverIDs,
+		"content": fmt.Sprintf("🚨【告警强提醒】%s\n请立即处理！", n.Title),,
 	}
 
 	bodyBytes, _ := json.Marshal(dingPayload)
@@ -169,6 +168,7 @@ func (p *DingTalkRobotProvider) sendDingNotice(ctx context.Context, token, userL
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("x-acs-dingtalk-access-token", token)
 
 	resp, err := p.client.Do(req)
 	if err != nil {
