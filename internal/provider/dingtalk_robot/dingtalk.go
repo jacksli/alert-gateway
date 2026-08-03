@@ -1,4 +1,4 @@
-package dingtalk_robot
+package provider
 
 import (
 	"bytes"
@@ -6,9 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
-	"sync"
+	"strconv"
+	"strings"
 	"time"
 
 	"alert-gateway/internal/entity"
@@ -17,137 +17,184 @@ import (
 
 const ProviderName = "dingtalk_robot"
 
-type DingTalkProvider struct {
-	appKey      string
-	appSecret   string
-	accessToken string
-	tokenExpire time.Time
-	mu          sync.RWMutex
+type DingTalkRobotProvider struct {
+	appKey     string
+	appSecret  string
+	agentID    int64
+	enableDing bool
+	dingType   int
+	client     *http.Client
+	tokenCache tokenCache
 }
 
 func init() {
-	notifier.Register(ProviderName, NewDingTalkProvider)
+	// ✅ 包装工厂构造函数，适配 notifier.Provider 接口类型
+	notifier.Register(ProviderName, func(cfg map[string]interface{}) (notifier.Provider, error) {
+		return NewDingTalkRobotProvider(cfg), nil
+	})
 }
 
-func NewDingTalkProvider(config map[string]interface{}) (notifier.Provider, error) {
-	appKey, _ := config["app_key"].(string)
-	appSecret, _ := config["app_secret"].(string)
+func NewDingTalkRobotProvider(cfg map[string]interface{}) *DingTalkRobotProvider {
+	appKey, _ := cfg["app_key"].(string)
+	appSecret, _ := cfg["app_secret"].(string)
+	agentID := toInt64(cfg["agent_id"])
 
-	if appKey == "" || appSecret == "" {
-		return nil, fmt.Errorf("dingtalk_robot 配置缺失 app_key 或 app_secret")
+	if agentID <= 0 {
+		panic("invalid dingtalk agent_id")
+	}
+	enableDing, _ := cfg["enable_ding"].(bool)
+	dingType := 1
+	if v, ok := cfg["ding_type"].(float64); ok && v > 0 {
+		dingType = int(v)
 	}
 
-	return &DingTalkProvider{
-		appKey:    appKey,
-		appSecret: appSecret,
-	}, nil
+	return &DingTalkRobotProvider{
+		appKey:     appKey,
+		appSecret:  appSecret,
+		agentID:    agentID,
+		enableDing: enableDing,
+		dingType:   dingType,
+		client:     &http.Client{Timeout: 10 * time.Second},
+	}
 }
 
-func (d *DingTalkProvider) Name() string {
+// ✅ 补充 Name() 方法，满足 notifier.Provider 接口定义
+func (p *DingTalkRobotProvider) Name() string {
 	return ProviderName
 }
 
-func (d *DingTalkProvider) Send(ctx context.Context, n *entity.Notification) error {
-	token, err := d.getAccessToken()
+func toInt64(v any) int64 {
+	switch t := v.(type) {
+	case int:
+		return int64(t)
+	case int64:
+		return t
+	case int32:
+		return int64(t)
+	case float64:
+		return int64(t)
+	case json.Number:
+		i, _ := t.Int64()
+		return i
+	case string:
+		i, _ := strconv.ParseInt(t, 10, 64)
+		return i
+	default:
+		return 0
+	}
+}
+
+func (p *DingTalkRobotProvider) Send(ctx context.Context, n *entity.Notification) error {
+	token, err := p.getAccessToken(ctx)
 	if err != nil {
-		return fmt.Errorf("获取钉钉 Token 失败: %w", err)
+		return fmt.Errorf("获取钉钉 AccessToken 失败: %w", err)
 	}
 
-	// 1. 构建 Markdown 消息内容
-	msgParamObj := map[string]string{
-		"title": n.Title,
-		"text":  n.Content,
-	}
-	msgParamBytes, _ := json.Marshal(msgParamObj)
-
-	reqBody := map[string]interface{}{
-		"robotCode": d.appKey, // 应用机器人的 AppKey 即为 robotCode
-		"userIds":   n.ReceiverIDs,
-		"msgKey":    "sampleMarkdown",
-		"msgParam":  string(msgParamBytes),
+	if len(n.ReceiverIDs) == 0 {
+		return fmt.Errorf("缺少接收人 UserID")
 	}
 
-	bodyBytes, _ := json.Marshal(reqBody)
+	userListStr := strings.Join(n.ReceiverIDs, ",")
 
-	// 2. 使用新版开放平台 API (api.dingtalk.com)
-	apiURL := "https://api.dingtalk.com/v1.0/robot/oToMessages/batchSend"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewBuffer(bodyBytes))
+	// 构建发送异步工作通知请求 Payload
+	payload := map[string]interface{}{
+		"agent_id":    p.agentID,
+		"userid_list": userListStr,
+		"msg": map[string]interface{}{
+			"msgtype": "action_card",
+			"action_card": map[string]interface{}{
+				"title":        n.Title,
+				"markdown":     fmt.Sprintf("%s\n\n> ⏰ 触发时间: %s", n.Content, time.Now().Format("15:04:05")),
+				"single_title": "查看详情",
+				"single_url":   "dingtalk://dingtalkpage/action/openapp", // 点击直达应用内卡片
+			},
+		},
+	}
+
+	bodyBytes, _ := json.Marshal(payload)
+	sendURL := fmt.Sprintf("https://oapi.dingtalk.com/topapi/message/corpconversation/asyncsend_v2?access_token=%s", token)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, sendURL, bytes.NewBuffer(bodyBytes))
 	if err != nil {
 		return err
 	}
-
-	// 新版 API 推荐在 Header 中传入 x-acs-dingtalk-access-token
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-acs-dingtalk-access-token", token)
 
-	resp, err := http.DefaultClient.Do(req)
-	//log.Println("Access_token:", token)
+	resp, err := p.client.Do(req)
 	if err != nil {
-		return err
+		return fmt.Errorf("调用钉钉工作通知接口失败: %w", err)
 	}
 	defer resp.Body.Close()
 
-	respBuf, _ := io.ReadAll(resp.Body)
-
-	// 校验返回结果
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("钉钉应用机器人发送失败 [HTTP %d]: %s", resp.StatusCode, string(respBuf))
-	} else {
-		log.Println("钉钉应用机器人发送成功", string(respBuf))
-	}
-
 	var res struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
+		ErrCode int    `json:"errcode"`
+		ErrMsg  string `json:"errmsg"`
+		TaskID  int64  `json:"task_id"`
 	}
-	_ = json.Unmarshal(respBuf, &res)
+	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
+		return err
+	}
+	if res.ErrCode != 0 {
+		return fmt.Errorf("钉钉工作通知推送失败 [%d]: %s", res.ErrCode, res.ErrMsg)
+	}
 
-	if res.Code != "" && res.Code != "0" && res.Code != "200" {
-		return fmt.Errorf("钉钉应用机器人返回错误 [%s]: %s", res.Code, res.Message)
+	// ---------------------------------------------------------------------
+	// 如果开启了自动 DING 强提醒，调用发送 DING 操作
+	// ---------------------------------------------------------------------
+	if p.enableDing {
+		if err := p.sendDingNotice(ctx, token, userListStr, n); err != nil {
+			// DING 提醒失败仅记录日志，不阻断主通知流程
+			fmt.Printf("[DING 触发异常] UserIDs: %s, 原因: %v\n", userListStr, err)
+		}
 	}
 
 	return nil
 }
 
-// 获取 AccessToken (新版 API 获取方式: POST https://api.dingtalk.com/v1.0/oauth2/accessToken)
-func (d *DingTalkProvider) getAccessToken() (string, error) {
-	d.mu.RLock()
-	if d.accessToken != "" && time.Now().Before(d.tokenExpire) {
-		defer d.mu.RUnlock()
-		return d.accessToken, nil
+// sendDingNotice 发送 DING 强提醒
+func (p *DingTalkRobotProvider) sendDingNotice(ctx context.Context, token, userListStr string, n *entity.Notification) error {
+	dingURL := fmt.Sprintf("https://oapi.dingtalk.com/topapi/ding/send?access_token=%s", token)
+
+	dingPayload := map[string]interface{}{
+		"open_ding_send_vo": map[string]interface{}{
+			"receiver_user_ids": strings.Split(userListStr, ","),
+			"content":           fmt.Sprintf("🚨【告警强提醒】%s\n请立即处理！", n.Title),
+			"remind_type":       p.dingtypeText(p.dingType), // 1: 应用内; 2: 短信; 3: 电话
+		},
 	}
-	d.mu.RUnlock()
 
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	reqPayload := map[string]string{
-		"appKey":    d.appKey,
-		"appSecret": d.appSecret,
-	}
-	bodyBytes, _ := json.Marshal(reqPayload)
-
-	resp, err := http.Post("https://api.dingtalk.com/v1.0/oauth2/accessToken", "application/json", bytes.NewBuffer(bodyBytes))
+	bodyBytes, _ := json.Marshal(dingPayload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, dingURL, bytes.NewBuffer(bodyBytes))
 	if err != nil {
-		return "", err
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return err
 	}
 	defer resp.Body.Close()
 
+	body, _ := io.ReadAll(resp.Body)
 	var res struct {
-		AccessToken string `json:"accessToken"`
-		ExpireIn    int    `json:"expireIn"`
-		Code        string `json:"code"`
-		Message     string `json:"message"`
+		ErrCode int    `json:"errcode"`
+		ErrMsg  string `json:"errmsg"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&res); err != nil {
-		return "", err
+	_ = json.Unmarshal(body, &res)
+	if res.ErrCode != 0 {
+		return fmt.Errorf("DING 接口返回错误 [%d]: %s", res.ErrCode, res.ErrMsg)
 	}
+	return nil
+}
 
-	if res.AccessToken == "" {
-		return "", fmt.Errorf("获取 AccessToken 失败 [%s]: %s", res.Code, res.Message)
+func (p *DingTalkRobotProvider) dingtypeText(t int) string {
+	switch t {
+	case 2:
+		return "SMS"
+	case 3:
+		return "CALL"
+	default:
+		return "APP"
 	}
-
-	d.accessToken = res.AccessToken
-	d.tokenExpire = time.Now().Add(time.Duration(res.ExpireIn-300) * time.Second)
-	return d.accessToken, nil
 }

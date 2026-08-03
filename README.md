@@ -10,14 +10,16 @@ server:
   # dingding 默认用户userid
   #   88888 对应钉钉用户名 
   #-----------------------
-  default_receiver_userid:
-    - "88888"
+default_receiver_userid:
+  - "88888"
 
 providers:
   # 渠道 1: 钉钉应用私信
   dingtalk_robot:
     app_key: "*****"
     app_secret: "*****"
+    ding_type: 1   # DING 类型：1-应用内DING(默认)，2-短信DING，3-电话DING
+
 
   # 渠道 2: 钉钉群 Webhook
   dingtalk_webhook:

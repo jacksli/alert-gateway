@@ -18,6 +18,15 @@ type ServerConfig struct {
 	Port string `mapstructure:"port"`
 }
 
+// DingTalkRobotConfig 定义钉钉应用机器人的专用配置
+type DingTalkRobotConfig struct {
+	AppKey     string `json:"app_key"`
+	AppSecret  string `json:"app_secret"`
+	AgentID    int64  `json:"agent_id"`
+	EnableDing bool   `json:"enable_ding"`
+	DingType   int    `json:"ding_type"` // 1: 应用内 DING; 2: 短信 DING; 3: 电话 DING
+}
+
 // LoadConfig 读取并解析配置文件
 func LoadConfig(path string) (*Config, error) {
 	v := viper.New()
