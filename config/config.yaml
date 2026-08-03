@@ -1,0 +1,18 @@
+server:
+  port: "8080"
+
+providers:
+  dingtalk_robot:
+    app_key: "YOUR_DINGTALK_APP_KEY"
+    app_secret: "YOUR_DINGTALK_APP_SECRET"
+  
+  dingtalk_webhook:
+    webhook_url: "https://oapi.dingtalk.com/robot/send?access_token=YOUR_ACCESS_TOKEN"
+    secret: "SECxxxxxxx" # 选填：加签密钥
+
+  email:
+    smtp_host: "smtp.qq.com"
+    smtp_port: 465
+    smtp_user: "alert@yourcompany.com"
+    smtp_pass: "your_smtp_password_or_token"
+    from: "运维告警中心 <alert@yourcompany.com>"
