@@ -1,0 +1,86 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alert-gateway-config
+  namespace: default
+data:
+  # 挂载的配置文件内容
+  config.yaml: |
+    server:
+      port: 8080
+    
+    # 填入你的真实 YAML 配置
+    auth:
+      api_token: "your-secret-token"
+    
+    providers:
+      dingtalk_app_group:
+        app_key: "dingxxxxxx"
+        app_secret: "secretxxxxxx"
+        robot_code: "dingxxxxxx"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alert-gateway
+  namespace: default
+  labels:
+    app: alert-gateway
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alert-gateway
+  template:
+    metadata:
+      labels:
+        app: alert-gateway
+    spec:
+      containers:
+        - name: alert-gateway
+          image: alert-gateway:latest # 替换为你的镜像仓库地址及 Tag
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: TZ
+              value: "Asia/Shanghai"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          # 挂载 ConfigMap 到容器内部的 /app/config 目录
+          volumeMounts:
+            - name: config-volume
+              mountPath: /app/config/config.yaml
+              subPath: config.yaml
+              readOnly: true
+      # 定义存储卷，来源于上面的 ConfigMap
+      volumes:
+        - name: config-volume
+          configMap:
+            name: alert-gateway-config
+            items:
+              - key: config.yaml
+                path: config.yaml
+
+---
+# 配合对外暴漏端口的 Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: alert-gateway-svc
+  namespace: default
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      name: http
+  selector:
+    app: alert-gateway
