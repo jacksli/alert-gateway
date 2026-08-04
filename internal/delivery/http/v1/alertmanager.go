@@ -1,7 +1,6 @@
 package v1
 
 import (
-	"alert-gateway/config"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"alert-gateway/config"
 	"alert-gateway/internal/entity"
 	"alert-gateway/internal/usecase/notifier"
 )
@@ -61,17 +61,34 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// 1. 钉钉群 Webhook（所有级别均推送）
 		go dispatchAsync(h.useCase, "dingtalk_webhook", notification, "钉钉群 Webhook")
 
-		// 2. 邮件 Email（所有级别均推送，如果指定了邮箱）
-		userEmail := alert.Labels["email"]
-		if userEmail != "" {
+		// ---------------------------------------------------------------------
+		// 🚀 2. 邮件 Email（优先使用告警标签，未传递则兜底使用默认邮件联系人）
+		// ---------------------------------------------------------------------
+		var targetEmails []string
+
+		if rawEmail := alert.Labels["email"]; rawEmail != "" {
+			// 支持逗号分隔传多个邮箱，如 "a@qq.com,b@qq.com"
+			for _, email := range strings.Split(rawEmail, ",") {
+				if trimmed := strings.TrimSpace(email); trimmed != "" {
+					targetEmails = append(targetEmails, trimmed)
+				}
+			}
+		} else {
+			// 兜底使用配置文件中的默认邮箱列表
+			targetEmails = h.cfg.DefaultReceiverEmail
+		}
+
+		if len(targetEmails) > 0 {
 			emailNotification := *notification
-			emailNotification.ReceiverIDs = []string{userEmail}
-			go dispatchAsync(h.useCase, "email", &emailNotification, fmt.Sprintf("邮件 (%s)", userEmail))
+			emailNotification.ReceiverIDs = targetEmails
+			logLabel := fmt.Sprintf("邮件 (%d 个地址: %s)", len(targetEmails), strings.Join(targetEmails, ","))
+			go dispatchAsync(h.useCase, "email", &emailNotification, logLabel)
+		} else {
+			log.Printf("[跳过推送] 告警未包含 email 标签且配置文件未配置 default_receiver_email")
 		}
 
 		// ---------------------------------------------------------------------
 		// 3. 钉钉应用机器人私信（仅高级别 critical/high 触发）
-		// 解析目标 UserID 列表：优先使用告警标签（支持逗号分隔多个），无标签时使用配置文件中的切片
 		// ---------------------------------------------------------------------
 		var targetUserIDs []string
 

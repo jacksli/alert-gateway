@@ -17,6 +17,7 @@ type Config struct {
 	Providers map[string]map[string]interface{} `mapstructure:"providers"`
 	// 修改为 []string 切片，支持多个默认接收人
 	DefaultReceiverUserID []string `mapstructure:"default_receiver_userid"`
+	DefaultReceiverEmail  []string `mapstructure:"default_receiver_email"` // 🚀 新增映射
 }
 
 type ServerConfig struct {
