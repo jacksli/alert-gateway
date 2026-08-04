@@ -17,6 +17,10 @@ default_receiver_userid:
   - "88888"
 default_receiver_email:
   - xx@gmail.com
+# 默认推送的目标群 openConversationId 列表
+# 产品小队群对应得openConversationId==
+default_receiver_groupid:
+   - xxx
 
 providers:
   # 渠道 1: 钉钉应用私信
@@ -31,7 +35,12 @@ providers:
     app_secret: "*****"
     enable_ding: true   # 启用DING功能
     ding_type: 1   # DING 类型：1-应用内DING(默认)，2-短信DING，3-电话DING
-
+  # 企业内部应用 - 发送群消息驱动
+  dingtalk_app_group:
+    app_key: "*****"
+    app_secret: "*****"
+    enable_ding: true   # 启用DING功能
+    ding_type: 1   # DING 类型：1-应用内DING(默认)，2-短信DING，3-电话DING
   # 渠道 2: 钉钉群 Webhook
   dingtalk_webhook:
     webhook_url: "https://oapi.dingtalk.com/robot/send?access_token=*****"
