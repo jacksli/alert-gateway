@@ -15,6 +15,8 @@ server:
   #-----------------------
 default_receiver_userid:
   - "88888"
+default_receiver_email:
+  - xx@gmail.com
 
 providers:
   # 渠道 1: 钉钉应用私信

@@ -10,6 +10,7 @@ import (
 	"alert-gateway/internal/usecase/notifier"
 
 	// 匿名导入驱动包
+	_ "alert-gateway/internal/provider/dingtalk_app_group" // 🚀 内部应用发钉钉群
 	_ "alert-gateway/internal/provider/dingtalk_robot"
 	_ "alert-gateway/internal/provider/dingtalk_webhook"
 	_ "alert-gateway/internal/provider/email"

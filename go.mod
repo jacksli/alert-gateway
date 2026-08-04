@@ -2,7 +2,10 @@ module alert-gateway
 
 go 1.25.0
 
-require github.com/spf13/viper v1.21.0
+require (
+	github.com/spf13/viper v1.21.0
+	github.com/yuin/goldmark v1.8.5
+)
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
