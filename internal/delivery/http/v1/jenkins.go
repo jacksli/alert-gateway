@@ -28,7 +28,7 @@ type JenkinsPayload struct {
 			Branch string `json:"branch"`
 			Commit string `json:"commit"`
 		} `json:"scm"`
-		Parameters map[string]interface{} `json:"parameters"` // 构建参数(如 ENV=prod, RECEIVER_USERID=user1,user2)
+		Parameters map[string]interface{} `json:"parameters"` // 构建参数(如 ENV=prod, GROUP_ID=cidXXXXXX==)
 	} `json:"build"`
 }
 
@@ -109,49 +109,53 @@ func (h *JenkinsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 
 	// ---------------------------------------------------------------------
-	// 🚀 3. 解析目标接收人 UserID 列表（优先 Parameters，兜底使用配置文件）
+	// 🚀 3. 解析目标群 openConversationId 列表（优先 Parameters，兜底使用配置文件）
 	// ---------------------------------------------------------------------
-	var targetUserIDs []string
-	var rawReceiverID string
+	var targetGroupIDs []string
+	var rawGroupID string
 
-	// 从 parameters 中查找 receiver_userid / RECEIVER_USERID / receiver_ids
+	// 从 parameters 中查找 group_id / open_conversation_id / receiver_group_id
 	for key, val := range payload.Build.Parameters {
 		k := strings.ToLower(key)
-		if k == "receiver_userid" || k == "receiver_id" || k == "receiver_ids" {
+		if k == "group_id" || k == "open_conversation_id" || k == "receiver_group_id" {
 			if strVal, ok := val.(string); ok {
-				rawReceiverID = strVal
+				rawGroupID = strVal
 				break
 			}
 		}
 	}
 
-	if rawReceiverID != "" {
-		// 支持逗号分隔传多个，例如 "user001, user002"
-		for _, id := range strings.Split(rawReceiverID, ",") {
+	if rawGroupID != "" {
+		// 支持逗号分隔传多个群 ID，例如 "cidXXX==, cidYYY=="
+		for _, id := range strings.Split(rawGroupID, ",") {
 			if trimmed := strings.TrimSpace(id); trimmed != "" {
-				targetUserIDs = append(targetUserIDs, trimmed)
+				targetGroupIDs = append(targetGroupIDs, trimmed)
 			}
 		}
 	} else {
-		// 兜底使用配置文件中的默认接收人切片
-		targetUserIDs = h.cfg.DefaultReceiverUserID
+		// 兜底使用配置文件中的默认接收群切片
+		targetGroupIDs = h.cfg.DefaultReceiverGroupID
 	}
 
-	// 构造统一的 Notification 实体
+	// 构造统一的 Notification 实体（ReceiverIDs 此时存的是群 openConversationId）
 	notification := &entity.Notification{
 		Title:       title,
 		Content:     content,
 		Status:      status,
-		ReceiverIDs: targetUserIDs, // 赋值目标接收人列表
+		ReceiverIDs: targetGroupIDs,
 	}
 
-	// 4. 异步调度专属驱动进行推送
+	// ---------------------------------------------------------------------
+	// 🚀 4. 异步调度企业内部应用群发驱动 (dingtalk_app_group) 进行推送
+	// ---------------------------------------------------------------------
 	go func(n *entity.Notification) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 
-		logLabel := fmt.Sprintf("Jenkins专属驱动 (共 %d 人: %s)", len(n.ReceiverIDs), strings.Join(n.ReceiverIDs, ","))
-		if err := h.useCase.Dispatch(ctx, "jenkins_dingtalk_robot", n); err != nil {
+		logLabel := fmt.Sprintf("钉钉企业应用群发 (目标群数: %d)", len(n.ReceiverIDs))
+
+		// 🎯 驱动名称切换为 dingtalk_app_group
+		if err := h.useCase.Dispatch(ctx, "dingtalk_app_group", n); err != nil {
 			log.Printf("[推送失败] %s: %v", logLabel, err)
 		} else {
 			log.Printf("[推送成功] %s", logLabel)

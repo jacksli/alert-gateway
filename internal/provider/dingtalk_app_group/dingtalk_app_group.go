@@ -14,17 +14,23 @@ import (
 	"alert-gateway/internal/usecase/notifier"
 )
 
-const ProviderName = "jenkins_dingtalk_app_group"
+const ProviderName = "dingtalk_app_group"
+
+// TokenCache 结构体，用于缓存 AccessToken
+type tokenCache struct {
+	token    string
+	expireAt time.Time
+	mu       sync.RWMutex
+}
 
 type DingTalkAppGroupProvider struct {
 	appKey    string
 	appSecret string
 	robotCode string // 机器人的 RobotCode（通常就是 AppKey）
 
-	// Token 缓存
-	accessToken string
-	tokenExpire time.Time
-	mu          sync.Mutex
+	// Token 缓存与 HTTP 客户端
+	tokenCache tokenCache
+	client     *http.Client
 }
 
 func init() {
@@ -48,6 +54,9 @@ func NewDingTalkAppGroupProvider(config map[string]interface{}) (notifier.Provid
 		appKey:    appKey,
 		appSecret: appSecret,
 		robotCode: robotCode,
+		client: &http.Client{
+			Timeout: 10 * time.Second, // 设置合理的 HTTP 超时
+		},
 	}, nil
 }
 
@@ -55,22 +64,39 @@ func (p *DingTalkAppGroupProvider) Name() string {
 	return ProviderName
 }
 
-// 获取/刷新 access_token
 func (p *DingTalkAppGroupProvider) getAccessToken(ctx context.Context) (string, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	// ---------- Fast Path (读锁) ----------
+	p.tokenCache.mu.RLock()
+	if p.tokenCache.token != "" && time.Now().Before(p.tokenCache.expireAt) {
+		token := p.tokenCache.token
+		p.tokenCache.mu.RUnlock()
+		return token, nil
+	}
+	p.tokenCache.mu.RUnlock()
 
-	// 未过期则复用
-	if p.accessToken != "" && time.Now().Before(p.tokenExpire) {
-		return p.accessToken, nil
+	// ---------- Refresh (写锁) ----------
+	p.tokenCache.mu.Lock()
+	defer p.tokenCache.mu.Unlock()
+
+	// Double Check 防止并发重复刷新
+	if p.tokenCache.token != "" && time.Now().Before(p.tokenCache.expireAt) {
+		return p.tokenCache.token, nil
 	}
 
-	url := fmt.Sprintf("https://oapi.dingtalk.com/gettoken?appkey=%s&appsecret=%s", p.appKey, p.appSecret)
-	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	url := fmt.Sprintf(
+		"https://oapi.dingtalk.com/gettoken?appkey=%s&appsecret=%s",
+		p.appKey,
+		p.appSecret,
+	)
 
-	resp, err := http.DefaultClient.Do(req)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return "", fmt.Errorf("获取 access_token 失败: %w", err)
+		return "", err
+	}
+
+	resp, err := p.client.Do(req)
+	if err != nil {
+		return "", err
 	}
 	defer resp.Body.Close()
 
@@ -78,7 +104,7 @@ func (p *DingTalkAppGroupProvider) getAccessToken(ctx context.Context) (string, 
 		ErrCode     int    `json:"errcode"`
 		ErrMsg      string `json:"errmsg"`
 		AccessToken string `json:"access_token"`
-		ExpiresIn   int    `json:"expires_in"`
+		ExpiresIn   int64  `json:"expires_in"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
@@ -86,13 +112,26 @@ func (p *DingTalkAppGroupProvider) getAccessToken(ctx context.Context) (string, 
 	}
 
 	if result.ErrCode != 0 {
-		return "", fmt.Errorf("获取 access_token 报错: %s", result.ErrMsg)
+		return "", fmt.Errorf(
+			"dingtalk gettoken failed [%d]: %s",
+			result.ErrCode,
+			result.ErrMsg,
+		)
 	}
 
-	p.accessToken = result.AccessToken
-	// 提前 200 秒刷新
-	p.tokenExpire = time.Now().Add(time.Duration(result.ExpiresIn-200) * time.Second)
-	return p.accessToken, nil
+	p.tokenCache.token = result.AccessToken
+
+	expire := result.ExpiresIn
+	if expire <= 300 {
+		expire = 7200
+	}
+
+	// 提前 5 分钟刷新
+	p.tokenCache.expireAt = time.Now().Add(
+		time.Duration(expire-300) * time.Second,
+	)
+
+	return result.AccessToken, nil
 }
 
 func (p *DingTalkAppGroupProvider) Send(ctx context.Context, n *entity.Notification) error {
@@ -101,9 +140,10 @@ func (p *DingTalkAppGroupProvider) Send(ctx context.Context, n *entity.Notificat
 		return fmt.Errorf("接收群组 open_conversation_id (ReceiverIDs) 不能为空")
 	}
 
+	// 🎯 修复点：调用本结构体的 getAccessToken 方法获取 token
 	accessToken, err := p.getAccessToken(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("获取钉钉 access_token 失败: %w", err)
 	}
 
 	// 钉钉新版 OpenAPI: 发送群消息
@@ -129,7 +169,8 @@ func (p *DingTalkAppGroupProvider) Send(ctx context.Context, n *entity.Notificat
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("x-acs-dingtalk-access-token", accessToken)
 
-		resp, err := http.DefaultClient.Do(req)
+		// 🎯 修复点：使用带超时的 p.client 替代 http.DefaultClient
+		resp, err := p.client.Do(req)
 		if err != nil {
 			return fmt.Errorf("发送群消息 HTTP 请求失败: %w", err)
 		}
