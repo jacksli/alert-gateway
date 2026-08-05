@@ -7,6 +7,8 @@
 # 全局安全认证配置
 auth:
   api_token: "your-global-secret-token-2026"  # 所有接口通用的认证 Token
+# 这里填入你的阿里云百炼 DeepSeek API Key
+aliyun_deepseek_api_key: xx
 server:
   port: "8080"
   #--------------------------------------
