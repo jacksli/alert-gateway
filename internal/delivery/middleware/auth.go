@@ -17,7 +17,8 @@ func TokenAuthMiddleware(validToken string, next http.Handler) http.Handler {
 		w.Header().Set("Content-Type", "application/json")
 
 		// 🎯 0. 路径白名单放行（如：钉钉机器人 @ 回调接口、健康检查接口）
-		if r.URL.Path == "/api/v1/dingtalk/robot" || r.URL.Path == "/health" {
+		// 在 TokenAuthMiddleware 的白名单放行判断逻辑中增加 /api/v1/aws：
+		if r.URL.Path == "/api/v1/dingtalk/robot" || r.URL.Path == "/api/v1/aws" || r.URL.Path == "/health" {
 			next.ServeHTTP(w, r)
 			return
 		}

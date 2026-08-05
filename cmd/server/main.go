@@ -39,11 +39,14 @@ func main() {
 	jenkinsHandler := v1.NewJenkinsHandler(uc, cfg, dsClient)
 	dingtalkRobotHandler := v1.NewDingTalkRobotHandler(uc, cfg, dsClient)
 
+	awsSNSHandler := v1.NewAWSSNSHandler(uc, cfg)
+
 	// 5. 创建 HTTP 路由 multiplexer
 	mux := http.NewServeMux()
 	mux.Handle("/api/v1/webhook", alertHandler)
 	mux.Handle("/api/v1/jenkins", jenkinsHandler)
 	mux.Handle("/api/v1/dingtalk/robot", dingtalkRobotHandler)
+	mux.Handle("/api/v1/aws", awsSNSHandler)
 
 	// 健康检查接口（可选）
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
