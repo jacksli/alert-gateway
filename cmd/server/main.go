@@ -61,6 +61,7 @@ func main() {
 	log.Printf("👉 Webhook 接口: /api/v1/webhook")
 	log.Printf("👉 CI/CD 接口: /api/v1/jenkins")
 	log.Printf("👉 钉钉机器人回调: /api/v1/dingtalk/robot")
+	log.Printf("👉 aws cloudwatch alarm回调: /api/v1/aws")
 
 	if err := http.ListenAndServe(":8080", protectedHandler); err != nil {
 		log.Fatal(err)
