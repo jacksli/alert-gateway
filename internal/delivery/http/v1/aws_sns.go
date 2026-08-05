@@ -128,18 +128,18 @@ func (h *AWSSNSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Title:       title,
 			Content:     content,
 			Status:      status,
-			ReceiverIDs: h.cfg.DefaultReceiverGroupID, // 使用默认接收群组 ID
+			ReceiverIDs: h.cfg.DefaultReceiverGroupID,
 		}
 
-		// 异步推送给钉钉驱动
+		// 🎯 3. 异步分发：将驱动名称切换为 dingtalk_robot
 		go func(n *entity.Notification) {
 			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 			defer cancel()
 
-			if err := h.useCase.Dispatch(ctx, "dingtalk_app_group", n); err != nil {
-				log.Printf("[AWS 推送失败]: %v", err)
+			if err := h.useCase.Dispatch(ctx, "dingtalk_robot", n); err != nil {
+				log.Printf("[AWS dingtalk_robot 推送失败]: %v", err)
 			} else {
-				log.Printf("[AWS 推送成功]")
+				log.Printf("[AWS dingtalk_robot 推送成功]")
 			}
 		}(notification)
 	}
