@@ -19,6 +19,7 @@ type Config struct {
 	DefaultReceiverUserID  []string `mapstructure:"default_receiver_userid"`
 	DefaultReceiverEmail   []string `mapstructure:"default_receiver_email"`   // 🚀 新增映射
 	DefaultReceiverGroupID []string `mapstructure:"default_receiver_groupid"` // 企业钉钉群id
+	AliyunDeepSeekAPIKey   string   `env:"ALIYUN_DEEPSEEK_API_KEY"`
 }
 
 type ServerConfig struct {

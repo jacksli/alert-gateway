@@ -11,10 +11,16 @@ type Response struct {
 	Message string `json:"message"`
 }
 
-// TokenAuthMiddleware 全局 Token 校验中间件
+// TokenAuthMiddleware 全局 Token 校验中间件（支持路径白名单）
 func TokenAuthMiddleware(validToken string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+
+		// 🎯 0. 路径白名单放行（如：钉钉机器人 @ 回调接口、健康检查接口）
+		if r.URL.Path == "/api/v1/dingtalk/robot" || r.URL.Path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
 
 		// 🔒 1. 检查服务端配置：如果未配置 Token，出于安全防护默认拒绝所有请求
 		if validToken == "" {
@@ -47,7 +53,7 @@ func TokenAuthMiddleware(validToken string, next http.Handler) http.Handler {
 // extractToken 从请求中提取 Token，支持：
 // 1. Authorization: Bearer <token>
 // 2. X-Api-Token: <token>
-// 3. X-Jenkins-Token: <token> (如果有需要)
+// 3. X-Jenkins-Token: <token>
 func extractToken(r *http.Request) string {
 	// 优先检查标准 Authorization: Bearer <token>
 	authHeader := r.Header.Get("Authorization")

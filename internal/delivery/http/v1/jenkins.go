@@ -11,6 +11,7 @@ import (
 
 	"alert-gateway/config"
 	"alert-gateway/internal/entity"
+	"alert-gateway/internal/pkg/deepseek"
 	"alert-gateway/internal/usecase/notifier"
 )
 
@@ -28,17 +29,22 @@ type JenkinsPayload struct {
 			Branch string `json:"branch"`
 			Commit string `json:"commit"`
 		} `json:"scm"`
-		Parameters map[string]interface{} `json:"parameters"` // 构建参数
+		Parameters map[string]interface{} `json:"parameters"` // 构建参数(如 ENV=prod, open_conversation_id=cidXXXXXX==)
 	} `json:"build"`
 }
 
 type JenkinsHandler struct {
-	useCase *notifier.NotifierUseCase
-	cfg     *config.Config
+	useCase        *notifier.NotifierUseCase
+	cfg            *config.Config
+	deepseekClient *deepseek.Client
 }
 
-func NewJenkinsHandler(uc *notifier.NotifierUseCase, cfg *config.Config) *JenkinsHandler {
-	return &JenkinsHandler{useCase: uc, cfg: cfg}
+func NewJenkinsHandler(uc *notifier.NotifierUseCase, cfg *config.Config, ds *deepseek.Client) *JenkinsHandler {
+	return &JenkinsHandler{
+		useCase:        uc,
+		cfg:            cfg,
+		deepseekClient: ds,
+	}
 }
 
 func (h *JenkinsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -61,11 +67,9 @@ func (h *JenkinsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	status := strings.ToUpper(payload.Build.Status)
 
-	// 🎯 1. 识别来源：GitHub Actions 还是 Jenkins
+	// 🎯 1. 自动识别来源：GitHub Actions 还是 Jenkins
 	source := "Jenkins"
 	platformIcon := "🏗️"
-	// 你可以通过检查 URL 特征或 Header 判定来源
-	// 这里简单通过 URL 是否包含 github.com 来判断
 	if strings.Contains(payload.Url, "github.com") {
 		source = "GitHub"
 		platformIcon = "🐙"
@@ -105,7 +109,21 @@ func (h *JenkinsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		logUrl += "console"
 	}
 
-	// 🎯 3. 拼装高颜值 Markdown 消息体
+	// 🎯 3. 构建失败时调用阿里云 DeepSeek 模型进行智能故障诊断
+	var aiAnalysisSection string
+	if status == "FAILURE" && h.deepseekClient != nil {
+		ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+		analysis, err := h.deepseekClient.AnalyzeFailure(ctx, payload.Name, branch, status)
+		cancel()
+
+		if err != nil {
+			log.Printf("[DeepSeek 诊断失败]: %v", err)
+		} else if analysis != "" {
+			aiAnalysisSection = fmt.Sprintf("\n\n🤖 **阿里云 DeepSeek 智能分析排错建议**:\n%s\n", analysis)
+		}
+	}
+
+	// 🎯 4. 拼装高颜值 Markdown 消息体
 	content := fmt.Sprintf(
 		"## %s\n\n"+
 			"--- \n"+
@@ -115,7 +133,7 @@ func (h *JenkinsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"- **构建状态**: %s \n"+
 			"- **Git 分支**: `%s` \n"+
 			"- **构建耗时**: %s \n"+
-			"- **完成时间**: %s \n\n"+
+			"- **完成时间**: %s \n%s"+
 			"--- \n"+
 			"🔗 [👉 点击查看构建日志详情](%s)",
 		headerTag,
@@ -126,11 +144,12 @@ func (h *JenkinsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		branch,
 		durationStr,
 		time.Now().Format("2006-01-02 15:04:05"),
+		aiAnalysisSection,
 		logUrl,
 	)
 
 	// ---------------------------------------------------------------------
-	// 🚀 4. 解析目标群 openConversationId 列表
+	// 🚀 5. 解析目标群 openConversationId 列表（优先 Parameters，兜底使用配置文件）
 	// ---------------------------------------------------------------------
 	var targetGroupIDs []string
 	var rawGroupID string
@@ -147,15 +166,18 @@ func (h *JenkinsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if rawGroupID != "" {
+		// 支持逗号分隔传多个群 ID，例如 "cidXXX==, cidYYY=="
 		for _, id := range strings.Split(rawGroupID, ",") {
 			if trimmed := strings.TrimSpace(id); trimmed != "" {
 				targetGroupIDs = append(targetGroupIDs, trimmed)
 			}
 		}
 	} else {
+		// 兜底使用配置文件中的默认接收群切片
 		targetGroupIDs = h.cfg.DefaultReceiverGroupID
 	}
 
+	// 构造统一的 Notification 实体
 	notification := &entity.Notification{
 		Title:       title,
 		Content:     content,
@@ -164,7 +186,7 @@ func (h *JenkinsHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// ---------------------------------------------------------------------
-	// 🚀 5. 异步推送
+	// 🚀 6. 异步调度企业内部应用群发驱动 (dingtalk_app_group) 进行推送
 	// ---------------------------------------------------------------------
 	go func(n *entity.Notification) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
