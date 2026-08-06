@@ -128,12 +128,13 @@ func (h *AWSSNSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Title:       title,
 			Content:     content,
 			Status:      status,
-			ReceiverIDs: h.cfg.DefaultReceiverGroupID,
+			ReceiverIDs: h.cfg.DefaultReceiverUserID,
 		}
 
 		// 🎯 3. 异步分发：将驱动名称切换为 dingtalk_robot
 		go func(n *entity.Notification) {
-			ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+			// 独立控制超时，不随父 HTTP 请求结束而终止
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 
 			if err := h.useCase.Dispatch(ctx, "dingtalk_robot", n); err != nil {
@@ -142,6 +143,7 @@ func (h *AWSSNSHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				log.Printf("[AWS dingtalk_robot 推送成功]")
 			}
 		}(notification)
+
 	}
 
 	w.WriteHeader(http.StatusOK)
